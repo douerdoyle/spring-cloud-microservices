@@ -1,0 +1,70 @@
+version: '3.7'
+
+services:
+
+  currency-exchange:
+    image: springboot/currency-exchange-service:0.0.1
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    ports:
+      - "8000:8000"
+    networks:
+      - currency-network
+    depends_on:
+      - naming-server
+    environment:
+      EUREKA.CLIENT.SERVICEURL.DEFAULTZONE: http://naming-server:8761/eureka
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -XX:InitialRAMPercentage=25.0"
+      BPL_JVM_THREAD_COUNT: "50"
+      BPL_JVM_HEAD_ROOM: "20"
+
+  currency-conversion:
+    image: springboot/currency-conversion-service:0.0.1
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    ports:
+      - "8100:8100"
+    networks:
+      - currency-network
+    depends_on:
+      - naming-server
+    environment:
+      EUREKA.CLIENT.SERVICEURL.DEFAULTZONE: http://naming-server:8761/eureka
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -XX:InitialRAMPercentage=25.0"
+      CURRENCY_EXCHANGE_SERVICE_URL: http://currency-exchange:8000
+
+  api-gateway:
+    image: springboot/api-gateway:0.0.1
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    ports:
+      - "8765:8765"
+    networks:
+      - currency-network
+    depends_on:
+      - naming-server
+    environment:
+      EUREKA.CLIENT.SERVICEURL.DEFAULTZONE: http://naming-server:8761/eureka
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -XX:InitialRAMPercentage=25.0"
+
+  naming-server:
+    image: springboot/naming-server:0.0.1
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    ports:
+      - "8761:8761"
+    networks:
+      - currency-network
+    environment:
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -XX:InitialRAMPercentage=25.0"
+
+networks:
+  currency-network:
