@@ -103,7 +103,7 @@ curl http://localhost:8765/currency-conversion-new/from/USD/to/TWD/quantity/10
 #### 1. Prerequisites
 1. Install Docker Desktop or another Docker engine that supports the `docker compose` command.
 2. Install Maven 3.9 or newer.
-3. Log in to the container registry that matches the image names configured in each `docker-compose/*/pom.xml` (the defaults publish `in28min/mmv3-...` images).
+3. Log in to the container registry that matches the image names configured in each `docker-compose/*/pom.xml`.
 
 #### 2. Build the container images
 Package each service in the `docker-compose` tree using the Spring Boot image builder. Run the commands below from the repository root so that the Maven wrapper picks up the proper source folders.
@@ -159,7 +159,7 @@ docker rmi \
 3. Choose a container registry that your cluster can pull from and sign in before building images.
 
 #### 2. Build and push the images
-The Kubernetes projects already contain Spring Boot image metadata that tags images as `in28min/mmv3-...`. Build each service and push it to your registry (or change the tag in the POM files before running these commands).
+
 ```bash
 cd kubernetes/currency-exchange-service
 mvn -DskipTests spring-boot:build-image
