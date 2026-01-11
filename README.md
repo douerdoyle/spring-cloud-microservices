@@ -1,218 +1,359 @@
-# Spring Cloud Microservices Playground
+# Spring Cloud Microservices System
 
-Inspiration: [in28minutes](https://github.com/in28minutes/spring-microservices-v3/tree/main)
+This repository has 3 workspaces named local, docker-compose, and kubernetes. Each workspace has Spring Cloud services for local, Docker, and Kubernetes.
 
-## Introduction
-This repository contains a lightweight microservices landscape built with Spring Boot 4.0.0, Spring Cloud 2025.1, and Java 25. It mirrors common production patterns such as centralized configuration, service discovery, gateway routing, resilience, and observability while remaining small enough to run locally. Each module now appears in three sibling directories so you can switch between Maven driven development under `local/`, container workflows under `docker-compose/`, and cluster ready deployments under `kubernetes/` without relearning the domain.
+## Why 3 Workspaces
 
-| Module (local path) | Port | Purpose | Highlights |
-| --- | --- | --- | --- |
-| `local/spring-cloud-config-server` | 8888 | Serves shared configuration from the Git repository at `local/git-localconfig-repo`. | `@EnableConfigServer`, file or remote Git support.
-| `local/naming-server` | 8761 | Eureka discovery server so every service can register and locate peers. | `eureka.client.register-with-eureka=false` keeps the registry authoritative.
-| `local/limits-service` | 8080 (default) | Simple REST API that reads `limits-service.minimum` and `limits-service.maximum` via Spring Cloud Config. | `@ConfigurationProperties` binding in `local/limits-service/src/main/java/com/springboot/microservices/limitsservice/configuration/Configuration.java`.
-| `local/currency-exchange-service` | 8000 | Provides foreign-exchange quotes backed by the in-memory H2 database seeded by `data.sql`. | Resilience4j demos (`/sample-api`), Micrometer tracing, and Eureka client support.
-| `local/currency-conversion-service` | 8100 | Calls the exchange service using the new `RestClient` and OpenFeign (`CurrencyExchangeProxy`). | Shows load-balanced discovery, Feign tracing, and Zipkin exporters.
-| `local/api-gateway` | 8765 | Spring Cloud Gateway front door that consolidates the REST APIs and rewrites paths. | Custom routes plus `LoggingFilter` for request traces in `local/api-gateway/src/main/java/com/springboot/microservices/apigateway/LoggingFilter.java`.
+| Workspace         | Focus                                                                |
+| ----------------- | -------------------------------------------------------------------- |
+| `local/`          | Shows how Spring Cloud components work together (Config/Eureka/Gateway). |
+| `docker-compose/` | Shows how to integrate Spring Cloud with Docker.               |
+| `kubernetes/`     | Shows how Spring Boot services are handled on Kubernetes.      |
 
-Key architectural elements:
-* **Externalized config**: Every service imports `spring.config.import=optional:configserver:` so shared values live in one Git repo. When Config Server is unavailable the services fall back to their local `application.properties` (the limits fallback of `3-997` lives in `local/limits-service/src/main/resources/application.properties`).
-* **Service discovery**: `local/currency-exchange-service`, `local/currency-conversion-service`, `local/limits-service`, and `local/api-gateway` point to `http://localhost:8761/eureka` so there is no need to hardcode host and port pairs once Eureka is running.
-* **Gateway routing**: `local/api-gateway/src/main/java/com/springboot/microservices/apigateway/ApiGatewayConfiguration.java` directs `/currency-exchange/**`, `/currency-conversion/**`, and `/currency-conversion-feign/**` to the right downstream service and rewrites `/currency-conversion-new/**` to the Feign endpoint.
-* **Resilience and observability**: `local/currency-exchange-service` wires Resilience4j retry, rate, and bulkhead configs and exposes Micrometer tracing to Zipkin (see `local/currency-exchange-service/pom.xml`). `local/api-gateway` logs every request path, and actuators are enabled so you can hit `/actuator/health` everywhere.
+## Architecture
 
-## Repository layout
-| Directory | Description |
-| --- | --- |
-| `local/` | Maven focused projects plus the sample Git config repo under `local/git-localconfig-repo` for development on a laptop.
-| `docker-compose/` | Docker ready copies of the core services with Spring Boot image builds wired into the Maven plugin and Compose files under `docker-compose/backup/`.
-| `kubernetes/` | Kubernetes tuned services, manifests, and ConfigMaps for the exchange and conversion workloads.
+Spring Cloud Config Server sources properties from the Git-backed repository inside `local/git-localconfig-repo`.
+Every runtime connects to the Config Server and exposes actuator endpoints for diagnostics.
+The Eureka naming server collects registrations from Limits Service, Currency Exchange Service, Currency Conversion Service, and API Gateway, which means client code relies on logical service identifiers instead of literal host names.
+The API Gateway becomes the single entry point in all environments, providing proxying.
 
-## Tutorial
-Follow the sequences below to run the stack in each environment. All commands assume you are at the repository root.
+```mermaid
+flowchart LR
+  Client[Client] --> Gateway[API Gateway]
+  Gateway --> Ex[Currency Exchange]
+  Gateway --> Conv[Currency Conversion]
+  Gateway --> Limits[Limits Service]
 
-### Local stack
-#### 1. Prerequisites
-1. Install JDK 25.
-2. Install Maven 3.9 or newer.
-3. Use the sample configuration Git repository under `local/git-localconfig-repo` or point `spring.cloud.config.server.git.uri` in `local/spring-cloud-config-server/src/main/resources/application.properties` to your own Git location.
-4. Optionally start Zipkin if you want to visualize traces (update `spring.zipkin.baseUrl` in the services before enabling).
+  Repo[Git Config Repo] --> Config[Config Server]
+  Config --> Ex
+  Config --> Conv
+  Config --> Limits
+  Config --> Gateway
+  Config --> Eureka[Naming Server]
 
-#### 2. Start the Spring Cloud Config Server (port 8888)
+  Ex -- register --> Eureka
+  Conv -- register --> Eureka
+  Limits -- register --> Eureka
+  Gateway -- register --> Eureka
+```
+
+## Modules
+
+| Module                              | Port | Purpose                                                                                                       |
+| ----------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------- |
+| `local/spring-cloud-config-server`  | 8888 | Shares configuration from `local/git-localconfig-repo`.                                                       |
+| `local/naming-server`               | 8761 | The Eureka service, which is the discovery server so that every service can register and locate one another.  |
+| `local/limits-service`              | 8080 | Reads `limits-service.minimum` and `limits-service.maximum` via Spring Cloud Config.                          |
+| `local/currency-exchange-service`   | 8000 | Provides currency exchange from the in-memory H2 database.                                                    |
+| `local/currency-conversion-service` | 8100 | The business logic is here, which will call currency-exchange-service to get the currency and then calculate. |
+| `local/api-gateway`                 | 8765 | The gateway that provides different entry points for APIs.                                                    |
+
+## Workspace Components
+
+| Workspace         | Config Server | Eureka | API Gateway | Limits | Exchange | Conversion | Config Source                                  |
+| ----------------- | ------------- | ------ | ----------- | ------ | -------- | ---------- | ---------------------------------------------- |
+| `local/`          | Yes           | Yes    | Yes         | Yes    | Yes      | Yes        | `local/git-localconfig-repo` via Config Server |
+| `docker-compose/` | No            | Yes    | Yes         | No     | Yes      | Yes        | `application.properties` in every service      |
+| `kubernetes/`     | No            | No     | No          | No     | Yes      | Yes        | App config + ConfigMap in `deployment.yaml`    |
+
+In Docker, the environment only keeps the required services for the request flow, so Config Server and Limits Service are removed.
+In Kubernetes, Service discovery and Ingress are used, so Config Server, Eureka, and Gateway are not included.
+
+## Environment
+
+Every environment section has instructions with commands.
+
+### Local Development
+
+The local workspace keeps pure Maven modules for direct execution on your environment. The config server reads the embedded Git repository, Eureka tracks each service, and the gateway provides proxying.
+
+#### Guided Path
+
+Ensure the JDK version is 17, Maven version is 3.9+, and Git is available.
+
+#### Command Reference
+
 ```bash
 cd local/spring-cloud-config-server
 mvn spring-boot:run
 ```
-Verify `http://localhost:8888/limits-service/default` returns the merged configuration. Leave this window running.
 
-#### 3. Launch the Eureka Naming Server (port 8761)
 ```bash
 cd local/naming-server
 mvn spring-boot:run
 ```
-Once it starts visit `http://localhost:8761` to watch instances register as they come online.
 
-#### 4. Bring up the backend services
-Start each service in its own terminal. They automatically register with Eureka and fetch configuration from the Config Server.
+Start each backend service in its own terminal:
+
 ```bash
-# Limits Service (defaults to 8080 unless overridden in the config repo)
-cd local/limits-service
-mvn spring-boot:run
+cd local/limits-service && mvn spring-boot:run
 ```
 
 ```bash
-# Currency Exchange Service (port 8000)
-cd local/currency-exchange-service
-mvn spring-boot:run
+cd local/currency-exchange-service && mvn spring-boot:run
 ```
 
 ```bash
-# Currency Conversion Service (port 8100)
-cd local/currency-conversion-service
-mvn spring-boot:run
+cd local/currency-conversion-service && mvn spring-boot:run
 ```
 
-Smoke test the APIs directly:
+Test the APIs to check if they can be called:
+
 ```bash
-curl http://localhost:8080/limits 
+curl http://localhost:8080/limits
 curl http://localhost:8000/currency-exchange/from/USD/to/TWD
 curl http://localhost:8100/currency-conversion/from/USD/to/TWD/quantity/10
 curl http://localhost:8100/currency-conversion-feign/from/EUR/to/TWD/quantity/10
-curl http://localhost:8000/sample-api
 ```
-Each response includes an `environment` field so you can see which instance served the call.
 
-#### 5. Start the API Gateway (port 8765)
+Start the gateway and route traffic through it:
+
 ```bash
-cd local/api-gateway
-mvn spring-boot:run
+cd local/api-gateway && mvn spring-boot:run
 ```
-From now on you can call every downstream service through the gateway and let it perform routing, discovery, and path rewriting:
-```bash
-curl http://localhost:8765/currency-exchange/from/USD/to/TWD
-curl http://localhost:8765/currency-conversion/from/USD/to/TWD/quantity/10
-curl http://localhost:8765/currency-conversion-new/from/USD/to/TWD/quantity/10
-```
-`local/api-gateway/src/main/java/com/springboot/microservices/apigateway/LoggingFilter.java` logs the path of each proxied request, so keep an eye on that terminal while testing.
 
-#### 6. Explore observability and configuration updates
-* Toggle values in your config Git repo (for example, change `limits-service.maximum`). Once committed, hit `/actuator/refresh` on the service or restart it to pick up the new value.
-* Point the Micrometer Zipkin exporter (see the commented properties in `local/currency-exchange-service/src/main/resources/application.properties`) at a running Zipkin instance to correlate traces that start at the gateway and flow through Feign and Resilience4j.
-* Use the Eureka dashboard to stop or start services and watch how the gateway automatically routes around missing instances.
-
-### Docker Compose stack
-#### 1. Prerequisites
-1. Install Docker Desktop or another Docker engine that supports the `docker compose` command.
-2. Install Maven 3.9 or newer.
-3. Log in to the container registry that matches the image names configured in each `docker-compose/*/pom.xml`.
-
-#### 2. Build the container images
-Package each service in the `docker-compose` tree using the Spring Boot image builder. Run the commands below from the repository root so that the Maven wrapper picks up the proper source folders.
-```bash
-cd docker-compose/naming-server
-mvn -DskipTests spring-boot:build-image
-cd ../currency-exchange-service
-mvn -DskipTests spring-boot:build-image
-cd ../currency-conversion-service
-mvn -DskipTests spring-boot:build-image
-cd ../api-gateway
-mvn -DskipTests spring-boot:build-image
-cd ../..
-```
-Tag the images differently if you are pushing to your own registry, then update the Compose files under `docker-compose/` to match those names.
-
-#### 3. Start the stack
-Use the Compose bundles to start as many services as you need. The most complete bundle is `docker-compose/docker-compose-04-api-gateway.yaml` which launches the naming server, exchange, conversion, and gateway services.
-```bash
-docker compose -f docker-compose/docker-compose.yaml up -d
-```
-For a smaller footprint pick one of the earlier bundles (for example `docker-compose-02-naming-server.yaml`) or enable Zipkin with `docker-compose-05-zipkin.yaml` once you want tracing data. Compose publishes the familiar ports (8000, 8100, 8761, 8765) to your host machine.
-
-#### 4. Exercise the services
-`curl` the same endpoints you used locally. The requests should behave the same while the backing services talk over the Compose network.
 ```bash
 curl http://localhost:8765/currency-conversion/from/USD/to/TWD/quantity/10
 curl http://localhost:8765/currency-conversion-new/from/USD/to/TWD/quantity/10
 ```
-Inspect logs with `docker compose logs -f currency-exchange` (swap the service name as needed) to confirm discovery and tracing.
 
-#### 5. Tear down
-```bash
-docker compose -f docker-compose/docker-compose.yaml down --remove-orphans
-```
-Repeat the command with whichever Compose file you used. Removing orphans ensures containers from earlier experiments do not linger.
+#### Smoke Test
 
-Remove all images:
 ```bash
-docker rmi \
-  paketobuildpacks/ubuntu-noble-run-tiny:0.0.47 \
-  springboot/currency-exchange-service:0.0.1 \
-  springboot/api-gateway:0.0.1 \
-  springboot/naming-server:0.0.1 \
-  springboot/currency-conversion-service:0.0.1 \
-  paketobuildpacks/builder-noble-java-tiny:latest
+curl http://localhost:8080/limits
+curl http://localhost:8000/currency-exchange/from/USD/to/TWD
+curl http://localhost:8765/currency-conversion-feign/from/USD/to/TWD/quantity/10
 ```
 
-### Kubernetes stack
-#### 1. Prerequisites
-1. Install Docker and Maven.
-2. Install `kubectl` and connect it to a Kubernetes cluster (local `kind`, `minikube`, or any managed provider).
-3. Choose a container registry that your cluster can pull from and sign in before building images.
+### Docker
 
-#### 2. Build and push the images
+Spring Cloud on Docker is just like the local environment, but it is optimized for containers and uses Docker images without manual Dockerfiles.
+This environment does not include Config Server, so configuration comes from `application.properties` in each service.
+
+#### Guided Path
+
+Ensure Docker is installed and running on the host.
+
+#### Command Reference
+
+Build images:
 
 ```bash
-cd kubernetes/currency-exchange-service
-mvn -DskipTests spring-boot:build-image
-# push the resulting image if your registry is remote
-cd ../currency-conversion-service
-mvn -DskipTests spring-boot:build-image
-cd ../..
+cd docker-compose/
+cd ./naming-server && mvn -DskipTests spring-boot:build-image && cd ../
+
+cd ./currency-exchange-service && mvn -DskipTests spring-boot:build-image && cd ../
+
+cd ./currency-conversion-service && mvn -DskipTests spring-boot:build-image && cd ../
+
+cd ./api-gateway && mvn -DskipTests spring-boot:build-image && cd ../
 ```
-Use `docker image tag` and `docker push` if you need to rename the images for your own registry.
 
-#### 3. Apply the manifests
-Deploy the exchange and conversion services with the final manifests supplied in the `backup` folders.
+Start the services:
+
 ```bash
-kubectl apply -f kubernetes/currency-exchange-service/backup/deployment-04-final.yaml
-kubectl apply -f kubernetes/currency-conversion-service/backup/deployment-03-final.yaml
+docker compose -f docker-compose.yaml up -d
 ```
-These manifests create Deployments, Services, and (for the conversion service) a ConfigMap that injects `CURRENCY_EXCHANGE_URI` pointing to `http://currency-exchange`.
 
-#### 4. Verify and test
-Watch the pods until they become ready.
+Test through the gateway:
+
 ```bash
+curl http://localhost:8765/currency-conversion/from/USD/to/TWD/quantity/10
+
+curl http://localhost:8765/currency-conversion-new/from/USD/to/TWD/quantity/10
+```
+
+View logs of a specific service:
+
+```bash
+docker compose logs -f currency-exchange
+```
+
+Tear down and clean up the environment:
+
+```bash
+docker compose -f docker-compose.yaml down --remove-orphans
+```
+
+Delete all images with the "springboot/" prefix.
+
+```bash
+docker images --format '{{.Repository}}:{{.Tag}}' | grep '^springboot/' | xargs -r docker rmi
+```
+
+#### Smoke Test
+
+Docker:
+
+```bash
+docker compose -f docker-compose.yaml up -d
+curl http://localhost:8765/currency-conversion-feign/from/USD/to/TWD/quantity/10
+docker compose -f docker-compose.yaml down --remove-orphans
+```
+
+### Kubernetes
+
+The Kubernetes environment includes Currency Exchange Service and Currency Conversion Service. The environment shows how Spring Cloud is run on Kubernetes.
+In Kubernetes:
+- Service discovery is usually provided by Kubernetes Service + DNS, so Eureka is not always required.
+- External entry is usually provided by Ingress / Gateway API, so Spring Cloud Gateway is not always required.
+- Configuration is usually provided by ConfigMap / Secret, so Config Server is not always required.
+- This workspace focuses on showing the same microservices deployed and exposed with Kubernetes features.
+
+#### macOS Setup (Clean and Minimal)
+
+This setup uses kind (Kubernetes in Docker). It keeps your host clean and is easy to remove.
+
+Install tools:
+
+```bash
+brew install kind
+```
+
+Create a local cluster:
+
+```bash
+kind create cluster --name scms
+```
+
+Verify the cluster:
+
+```bash
+kubectl cluster-info
+kubectl get nodes
+```
+
+Clean removal:
+
+```bash
+kind delete cluster --name scms
+# Optional
+# Uninstall kind
+# brew uninstall kind
+```
+
+Optional cleanup if you want to remove kube config data:
+
+```bash
+rm -rf ~/.kube
+```
+
+#### Command Reference
+
+Build Docker images and load them into Kubernetes:
+
+```bash
+cd kubernetes/
+
+cd ./currency-exchange-service && mvn -DskipTests spring-boot:build-image
+
+cd ../currency-conversion-service && mvn -DskipTests spring-boot:build-image
+
+cd ../
+
+# Delete images in Kubernetes first
+docker exec -it scms-control-plane crictl rmi springboot/mmv3-currency-conversion-service:0.0.1-Kubernetes
+docker exec -it scms-control-plane crictl rmi springboot/mmv3-currency-exchange-service:0.0.1-Kubernetes
+
+# Load images to Kubernetes
+kind load docker-image springboot/mmv3-currency-conversion-service:0.0.1-Kubernetes --name scms
+kind load docker-image springboot/mmv3-currency-exchange-service:0.0.1-Kubernetes --name scms
+```
+
+Apply the deployments:
+
+```bash
+kubectl apply -f currency-exchange-service/deployment.yaml
+kubectl apply -f currency-conversion-service/deployment.yaml
+```
+
+Inspect resources:
+
+```bash
+kubectl get deployment
 kubectl get pods
 kubectl get services currency-exchange currency-conversion
 ```
-If your cluster provides LoadBalancer addresses, hit the services directly. Otherwise port-forward traffic from your machine.
+
+Port forward for local testing:
+
 ```bash
 kubectl port-forward service/currency-exchange 8000:8000
+```
+
+```bash
 kubectl port-forward service/currency-conversion 8100:8100
+```
+
+In Kubernetes, we need to expose services with Service or Ingress. Forwarding ports is used here for a quick demo.
+
+```bash
 curl http://localhost:8100/currency-conversion-feign/from/USD/to/TWD/quantity/10
 ```
-Update `kubernetes/currency-conversion-service/backup/deployment-03-final.yaml` if your image names or namespaces differ, then reapply the manifest.
 
-#### 5. Explore further
-* Scale replicas with `kubectl scale deployment currency-exchange --replicas=3` and watch how the LoadBalancer or port-forward rotates traffic.
-* Update the ConfigMap to change downstream URLs, then restart the conversion pods to pick up the change.
-* Integrate Zipkin or another tracing backend by setting the same `MANAGEMENT_ZIPKIN_TRACING_ENDPOINT` environment variable that appears in the Compose files.
+Scale replicas:
 
-With these three workflows you can move the microservices playground from a laptop to Docker Compose and all the way to Kubernetes while keeping one README that explains every path.
+```bash
+kubectl scale deployment currency-exchange --replicas=3
 
-## Others
+kubectl get pods
+```
 
-You can use the command below to remove all `target` directories.
+The output will change from:
+
+```text
+NAME                  READY   UP-TO-DATE   AVAILABLE   AGE
+currency-conversion   1/1     1            1           43s
+currency-exchange     1/1     1            1           43s
+```
+
+To this:
+
+```text
+NAME                  READY   UP-TO-DATE   AVAILABLE   AGE
+currency-conversion   1/1     1            1           46s
+currency-exchange     1/3     3            1           46s
+```
+
+Clean up Kubernetes resources and images:
+
+```bash
+kubectl delete deployment currency-conversion currency-exchange
+kubectl delete service currency-conversion currency-exchange
+kubectl delete pods -l app=currency-conversion
+kubectl delete pods -l app=currency-exchange
+```
+
+If you are using kind, remove the images from the node:
+
+```bash
+docker exec -it scms-control-plane crictl rmi springboot/mmv3-currency-conversion-service:0.0.1-Kubernetes
+docker exec -it scms-control-plane crictl rmi springboot/mmv3-currency-exchange-service:0.0.1-Kubernetes
+```
+
+#### Smoke Test
+
+```bash
+kubectl apply -f currency-exchange-service/deployment.yaml
+kubectl apply -f currency-conversion-service/deployment.yaml
+curl http://localhost:8100/currency-conversion-feign/from/USD/to/TWD/quantity/10
+```
+
+## Repository Utilities
+
+Clear all Maven target folders when you want a clean slate:
 
 ```bash
 find . -name target -type d -prune -exec rm -rf {} +
 ```
 
-This removes every stopped Docker container, keeping only the running ones.
+Remove leftover containers and images from Docker experiments:
+
 ```bash
 docker container prune -f
-```
-
-This clears dangling (“null”) images that no longer have a tag or container reference.
-```bash
 docker image prune -f
 ```
+
+## Credit
+
+- [in28minutes](https://github.com/in28minutes/spring-microservices-v3/tree/main)
