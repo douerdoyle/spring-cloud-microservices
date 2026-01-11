@@ -23,12 +23,13 @@ spec:
         app: currency-conversion
     spec:
       containers:
-      - image: springboot/mmv3-currency-conversion-service:0.0.12-SNAPSHOT
+      - image: springboot/mmv3-currency-conversion-service:0.0.1-k8s
         imagePullPolicy: IfNotPresent
         name: mmv2-currency-conversion-service
-        env:
-          - name: CURRENCY_EXCHANGE_URI
-            value: http://currency-exchange
+        envFrom:
+        - configMapRef:
+            name: currency-conversion
+
       restartPolicy: Always
 ---
 apiVersion: v1
@@ -47,3 +48,11 @@ spec:
     app: currency-conversion
   sessionAffinity: None
   type: LoadBalancer
+---
+apiVersion: v1
+data:
+  CURRENCY_EXCHANGE_URI: http://currency-exchange
+kind: ConfigMap
+metadata:
+  name: currency-conversion
+  namespace: default
